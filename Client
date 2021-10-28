@@ -1,0 +1,110 @@
+using System;
+using System.Collections.Generic;
+using System.ComponentModel;
+using System.Data;
+using System.Drawing;
+using System.Linq;
+using System.Text;
+using System.Threading.Tasks;
+using System.Windows.Forms;
+using System.Net;
+using System.Net.Sockets;
+
+namespace AsyncGUISimpleClient
+{
+    public partial class Client : Form
+    {
+        Socket server;
+        IPAddress serverIPAddress;
+
+        delegate void AppendTextDelegate(Control ctrl, string s);
+        AppendTextDelegate _textAppend;
+
+        public Client()
+        {
+            InitializeComponent();
+            server = new Socket(AddressFamily.InterNetwork,
+                SocketType.Stream, ProtocolType.Tcp);
+            _textAppend = new AppendTextDelegate(AppendText);
+        }
+
+        void AppendText(Control ctrl, string s)
+        {
+            if (ctrl.InvokeRequired) ctrl.Invoke(_textAppend, ctrl, s);
+            else
+            {
+                string source = ctrl.Text;
+                ctrl.Text = source + Environment.NewLine + s;
+            }
+        }
+
+        private void btnConnect_Click(object sender, EventArgs e)
+        {
+            int port;
+            if (!int.TryParse(txtPort.Text, out port))
+            { //port 입력 안함
+                txtPort.Focus();
+                txtPort.SelectAll();
+                return;
+            }
+            if (string.IsNullOrEmpty(txtAddress.Text))
+            {
+                serverIPAddress = IPAddress.Loopback;
+                txtAddress.Text = serverIPAddress.ToString();
+            }
+            else
+            {
+                serverIPAddress = IPAddress.Parse(txtAddress.Text);
+            }
+
+            IPEndPoint serverEP = new IPEndPoint(serverIPAddress, port);
+
+            try
+            {
+                server.Connect(serverEP);
+            }
+            catch
+            {
+                return;
+            }
+
+            AppendText(txtHistory, "서버와 연결되었습니다");
+            AsyncObject obj = new AsyncObject(4096);
+            obj.workingSocket = server;
+            server.BeginReceive(obj.Buffer, 0, obj.BufferSize, 0,
+                DataReceived, obj);
+        }
+
+        void DataReceived(IAsyncResult ar)
+        {
+            AsyncObject obj = ar.AsyncState as AsyncObject;
+            int received = obj.workingSocket.EndReceive(ar);
+            string text = Encoding.UTF8.GetString(obj.Buffer);
+            AppendText(txtHistory, text);
+            obj.clearBuffer();
+            obj.workingSocket.BeginReceive(obj.Buffer, 0, obj.BufferSize, 0,
+                DataReceived, obj);
+        }
+
+        private void btnSend_Click(object sender, EventArgs e)
+        {
+            if (!server.IsBound) return;
+            string text = txtSend.Text.Trim();
+            if (string.IsNullOrEmpty(text)) return;
+            byte[] bDTS = Encoding.UTF8.GetBytes("Client:" + text);
+            AppendText(txtHistory, "Client:" + text);
+            server.Send(bDTS);
+            txtSend.Clear();
+        }
+
+        private void Client_FormClosing(object sender, FormClosingEventArgs e)
+        {
+            try
+            {
+                server.Close();
+            }
+            catch
+            { }
+        }
+    }
+}
